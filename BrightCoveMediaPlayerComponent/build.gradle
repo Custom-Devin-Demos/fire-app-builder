@@ -59,7 +59,6 @@ dependencies {
 }
 
 repositories {
-    jcenter()
     mavenCentral()
     maven { url 'http://repo.brightcove.com/releases' }
 }

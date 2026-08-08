@@ -75,7 +75,8 @@ dependencies {
 
 buildscript {
     repositories {
-        jcenter()
+        google()
+        mavenCentral()
     }
     dependencies {
         //classpath 'me.tatarka:gradle-retrolambda:3.2.3'

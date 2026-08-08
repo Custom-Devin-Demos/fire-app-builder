@@ -18,7 +18,6 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        jcenter()
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:7.0.4'
@@ -30,7 +29,6 @@ buildscript {
 allprojects {
     repositories {
         google()
-        jcenter()
         mavenCentral()
         if (rootProject.hasProperty('mavenUrl')) {
             maven { url rootProject.mavenUrl }

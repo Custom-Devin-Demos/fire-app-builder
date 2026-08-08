@@ -19,13 +19,16 @@ apply plugin: 'com.android.application'
 apply from: "../artifacts.gradle"
 
 repositories {
+    google()
+    mavenCentral()
     // Uncomment when using CrashlyticsComponent
     //maven { url 'https://maven.fabric.io/public' }
 }
 
 buildscript {
     repositories {
-        jcenter()
+        google()
+        mavenCentral()
         // Uncomment when using CrashlyticsComponent
         //maven { url 'https://maven.fabric.io/public' }
     }
