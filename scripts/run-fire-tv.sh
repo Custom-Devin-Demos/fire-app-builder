@@ -62,6 +62,18 @@ if [ "$booted" != true ]; then
   exit 1
 fi
 
+network_ready=false
+for _ in $(seq 1 60); do
+  if "$ADB" shell dumpsys connectivity 2>/dev/null | grep -q 'VALIDATED'; then
+    network_ready=true
+    break
+  fi
+  sleep 1
+done
+if [ "$network_ready" != true ]; then
+  echo "Emulator network did not become validated; continuing anyway" >&2
+fi
+
 "$ADB" install -r "$APK_PATH"
 "$ADB" shell monkey -p "$PACKAGE_NAME" 1 >/dev/null
 echo "Ready: $PACKAGE_NAME on $AVD_NAME"
