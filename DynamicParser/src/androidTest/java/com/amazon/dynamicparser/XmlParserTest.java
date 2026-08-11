@@ -195,4 +195,52 @@ public class XmlParserTest {
     public void testParseWithInvalidQuery() throws  Exception {
         parser.parseWithQuery(xml1, "doc/p[3]");
     }
+
+    /**
+     * Test that an XML external entity payload that tries to read a local file is rejected.
+     */
+    @Test(expected = IParser.InvalidDataException.class)
+    public void testParseRejectsExternalEntity() throws Exception {
+
+        parser.parse("<?xml version=\"1.0\"?>" +
+                             "<!DOCTYPE doc [<!ENTITY secret SYSTEM \"file:///etc/hosts\">]>" +
+                             "<doc><p>&secret;</p></doc>");
+    }
+
+    /**
+     * Test that an entity expansion payload is rejected.
+     */
+    @Test(expected = IParser.InvalidDataException.class)
+    public void testParseRejectsEntityExpansion() throws Exception {
+
+        parser.parse("<!DOCTYPE lolz [<!ENTITY lol \"lol\">" +
+                             "<!ENTITY lol2 \"&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;\">" +
+                             "<!ENTITY lol3 \"&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;\">]>" +
+                             "<lolz>&lol3;</lolz>");
+    }
+
+    /**
+     * Test that a DOCTYPE declaration hidden behind a comment in the prolog is still rejected.
+     */
+    @Test(expected = IParser.InvalidDataException.class)
+    public void testParseRejectsDoctypeAfterComment() throws Exception {
+
+        parser.parse("<!-- a comment --><!DOCTYPE doc " +
+                             "[<!ENTITY secret SYSTEM \"file:///etc/hosts\">]>" +
+                             "<doc><p>&secret;</p></doc>");
+    }
+
+    /**
+     * Test that text resembling a DOCTYPE declaration inside element content does not prevent
+     * a well formed document from being parsed.
+     */
+    @Test
+    public void testParseAllowsDoctypeTextInContent() throws Exception {
+
+        Map<String, Object> result = (Map<String, Object>)
+                parser.parse("<doc><p>&lt;!DOCTYPE is not allowed</p></doc>");
+        Map<String, Object> paragraph = (Map<String, Object>) result.get("p");
+        assertTrue("The text content should be preserved",
+                   paragraph.get("#text").equals("<!DOCTYPE is not allowed"));
+    }
 }
