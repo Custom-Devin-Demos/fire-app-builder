@@ -16,8 +16,10 @@ package com.amazon.dynamicparser.impl;
 
 import com.amazon.dynamicparser.IParser;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
@@ -73,6 +75,40 @@ public class XmlParser implements IParser {
      * starting at the root node of the XML data.
      */
     private final String DEFAULT_QUERY = "*";
+
+    /**
+     * Feature that causes the parser to reject documents containing a DOCTYPE declaration.
+     */
+    private static final String DISALLOW_DOCTYPE_DECL_FEATURE =
+            "http://apache.org/xml/features/disallow-doctype-decl";
+
+    /**
+     * Feature controlling resolution of external general entities.
+     */
+    private static final String EXTERNAL_GENERAL_ENTITIES_FEATURE =
+            "http://xml.org/sax/features/external-general-entities";
+
+    /**
+     * Feature controlling resolution of external parameter entities.
+     */
+    private static final String EXTERNAL_PARAMETER_ENTITIES_FEATURE =
+            "http://xml.org/sax/features/external-parameter-entities";
+
+    /**
+     * Feature controlling loading of external DTDs.
+     */
+    private static final String LOAD_EXTERNAL_DTD_FEATURE =
+            "http://apache.org/xml/features/nonvalidating/load-external-dtd";
+
+    /**
+     * Markup constants used while scanning the document prolog.
+     */
+    private static final char BOM = '\uFEFF';
+    private static final String COMMENT_START = "<!--";
+    private static final String COMMENT_END = "-->";
+    private static final String PROCESSING_INSTRUCTION_START = "<?";
+    private static final String PROCESSING_INSTRUCTION_END = "?>";
+    private static final String DOCTYPE_START = "<!DOCTYPE";
 
     /**
      * Parses a XML-encoded string into an object.
@@ -153,8 +189,13 @@ public class XmlParser implements IParser {
         // Document to hold XML data.
         Document doc;
 
+        // The XML comes from an untrusted source such as a remote feed, so refuse any document
+        // that carries a DOCTYPE declaration. This is what makes XML external entity (XXE)
+        // attacks impossible regardless of which parser implementation the platform provides.
+        rejectDoctypeDeclaration(data);
+
         try {
-            DocumentBuilder docBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+            DocumentBuilder docBuilder = createSecureDocumentBuilder();
             doc = docBuilder.parse(new InputSource(new StringReader(data)));
         }
         // Catch and log an exception for malformed XML data, then throw it back so the user can
@@ -212,6 +253,122 @@ public class XmlParser implements IParser {
         }
 
         return result;
+    }
+
+    /**
+     * Creates a {@link DocumentBuilder} that does not resolve DOCTYPE declarations or external
+     * entities, so that untrusted XML cannot be used for XML external entity (XXE) attacks such
+     * as local file disclosure, server side request forgery, or entity expansion denial of
+     * service.
+     *
+     * @return A hardened document builder.
+     * @throws ParserConfigurationException If the builder cannot be configured securely.
+     */
+    private DocumentBuilder createSecureDocumentBuilder() throws ParserConfigurationException {
+
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+
+        // These features are defense in depth: the Android platform factory rejects every
+        // feature name it does not know, so they can only be applied on a best effort basis.
+        setFeatureQuietly(factory, XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        setFeatureQuietly(factory, DISALLOW_DOCTYPE_DECL_FEATURE, true);
+        setFeatureQuietly(factory, EXTERNAL_GENERAL_ENTITIES_FEATURE, false);
+        setFeatureQuietly(factory, EXTERNAL_PARAMETER_ENTITIES_FEATURE, false);
+        setFeatureQuietly(factory, LOAD_EXTERNAL_DTD_FEATURE, false);
+
+        try {
+            // The Android platform factory does not implement this setter at all.
+            factory.setXIncludeAware(false);
+        }
+        catch (UnsupportedOperationException e) {
+            Log.w(TAG, "XML parser does not support XInclude configuration.", e);
+        }
+        factory.setExpandEntityReferences(false);
+
+        DocumentBuilder docBuilder = factory.newDocumentBuilder();
+        // Never fetch anything an external reference points at.
+        docBuilder.setEntityResolver((publicId, systemId) ->
+                                             new InputSource(new StringReader("")));
+        return docBuilder;
+    }
+
+    /**
+     * Throws if the given document declares a DOCTYPE. Only the XML declaration, processing
+     * instructions, comments and whitespace may precede a DOCTYPE declaration, so the prolog is
+     * scanned for those constructs instead of searching the whole document, which would also
+     * match harmless text in element content.
+     *
+     * @param data The XML data string to inspect.
+     * @throws InvalidDataException If the document contains a DOCTYPE declaration.
+     */
+    private void rejectDoctypeDeclaration(String data) throws InvalidDataException {
+
+        int index = 0;
+
+        // Skip an optional byte order mark.
+        if (data.charAt(0) == BOM) {
+            index++;
+        }
+
+        while (index < data.length()) {
+
+            if (Character.isWhitespace(data.charAt(index))) {
+                index++;
+            }
+            else if (data.startsWith(COMMENT_START, index)) {
+                index = skipPast(data, COMMENT_END, index + COMMENT_START.length());
+            }
+            else if (data.startsWith(PROCESSING_INSTRUCTION_START, index)) {
+                index = skipPast(data, PROCESSING_INSTRUCTION_END,
+                                 index + PROCESSING_INSTRUCTION_START.length());
+            }
+            else if (data.startsWith(DOCTYPE_START, index)) {
+                Log.e(TAG, "Rejected XML containing a DOCTYPE declaration.");
+                throw new InvalidDataException("XML containing a DOCTYPE declaration is not " +
+                                                       "supported.", null);
+            }
+            else {
+                // Anything else means the prolog is over, so no DOCTYPE declaration can follow.
+                return;
+            }
+
+            // An unterminated construct means the document is malformed; let the parser report it.
+            if (index < 0) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * Finds the index just past the next occurrence of the given delimiter.
+     *
+     * @param data      The string to search.
+     * @param delimiter The delimiter to search for.
+     * @param fromIndex The index to start searching from.
+     * @return The index following the delimiter, or -1 if the delimiter is not present.
+     */
+    private int skipPast(String data, String delimiter, int fromIndex) {
+
+        int end = data.indexOf(delimiter, fromIndex);
+        return end < 0 ? -1 : end + delimiter.length();
+    }
+
+    /**
+     * Sets a defense in depth feature on the given factory, ignoring the feature if the
+     * underlying parser implementation does not recognize it.
+     *
+     * @param factory The factory to configure.
+     * @param feature The feature name.
+     * @param value   The value to set the feature to.
+     */
+    private void setFeatureQuietly(DocumentBuilderFactory factory, String feature, boolean value) {
+
+        try {
+            factory.setFeature(feature, value);
+        }
+        catch (ParserConfigurationException e) {
+            Log.w(TAG, "XML parser does not support feature " + feature, e);
+        }
     }
 
     /**
