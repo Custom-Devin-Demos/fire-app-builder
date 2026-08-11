@@ -9,6 +9,7 @@
     "id@mId",
     "description@mDescription",
     "videoURL@mUrl",
+    "format@mFormat",
     "imgURL@mCardImageUrl",
     "imgURL@mBackgroundImageUrl",
     "channel_id@mChannelId",
