@@ -146,8 +146,11 @@ public class WebViewProvider {
         public void onReceivedSslError(AmazonWebView webView, AmazonSslErrorHandler
                 sslErrorHandler, SslError sslError) {
 
-            Log.i(TAG, "onReceivedSslError " + String.valueOf(sslError));
-            sslErrorHandler.proceed();
+            // Never proceed with an invalid certificate; doing so would allow an on-path
+            // attacker to serve arbitrary content for the requested origin.
+            Log.e(TAG, "onReceivedSslError, cancelling load " + String.valueOf(sslError));
+            sslErrorHandler.cancel();
+            closeWebView("Failure");
         }
 
         @Override
